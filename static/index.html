@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>TuxChat</title>
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    #splash {
+      transition: opacity 0.5s ease, visibility 0.5s ease;
+    }
+    #splash.hide {
+      opacity: 0;
+      visibility: hidden;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 h-screen">
+
+  <!-- Splash Screen -->
+  <div id="splash" class="fixed inset-0 bg-white z-50 flex flex-col justify-center items-center p-6">
+    <h1 class="text-2xl font-bold mb-4">Welcome to TuxChat</h1>
+    <input id="splashNickname" type="text" placeholder="Enter your nickname" class="p-2 border rounded w-full max-w-sm mb-2">
+    <p id="nicknameWarning" class="text-red-500 mb-4 hidden">Enter a nickname!</p>
+    <button onclick="signInSplash()" class="bg-green-500 text-white px-6 py-2 rounded">Sign In</button>
+  </div>
+
+  <div class="md:flex h-full">
+    <!-- Sidebar -->
+    <div class="hidden md:block w-1/4 bg-white shadow p-4">
+      <h2 class="text-xl font-bold mb-4">Rooms</h2>
+      <input id="roomInput" type="text" placeholder="Room name" class="w-full p-2 border rounded mb-2">
+      <button onclick="joinRoom()" class="w-full bg-blue-500 text-white py-2 rounded">Join Room</button>
+      <button onclick="hostRoom()" class="w-full bg-green-500 text-white py-2 rounded mt-2">Host Room</button>
+      <button onclick="leaveRoom()" class="w-full bg-red-500 text-white py-2 rounded mt-2">Leave Room</button>
+    </div>
+
+    <!-- Main Chat Panel -->
+    <div class="flex-1 flex flex-col">
+      <div class="bg-white shadow p-4 flex flex-wrap md:justify-between items-center">
+        <h1 class="text-xl font-bold flex-1">TuxChat</h1>
+        <div class="flex space-x-2 mt-2 md:mt-0">
+          <input id="nicknameInput" type="text" placeholder="Nickname" class="p-2 border rounded">
+          <button onclick="signIn()" class="bg-green-500 text-white px-4 py-2 rounded">Sign In</button>
+        </div>
+      </div>
+
+      <!-- Room controls for mobile -->
+      <div class="md:hidden p-4 bg-white shadow flex flex-wrap gap-2 justify-between">
+        <input id="roomInputMobile" type="text" placeholder="Room name" class="flex-1 p-2 border rounded">
+        <button onclick="joinRoom()" class="bg-blue-500 text-white px-3 py-2 rounded">Join</button>
+        <button onclick="hostRoom()" class="bg-green-500 text-white px-3 py-2 rounded">Host</button>
+        <button onclick="leaveRoom()" class="bg-red-500 text-white px-3 py-2 rounded">Leave</button>
+      </div>
+
+      <!-- Chat Box -->
+      <div id="chatBox" class="flex-1 p-4 overflow-y-auto space-y-2 bg-gray-50"></div>
+
+      <!-- Message input -->
+      <div class="p-4 bg-white shadow flex items-center space-x-2">
+        <input id="messageInput" type="text" placeholder="Type a message" class="flex-1 p-2 border rounded">
+        <button onclick="sendMessage()" class="bg-blue-500 text-white px-4 py-2 rounded">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    let room = '';
+    let nickname = '';
+
+    function getRoomName() {
+      const desktopInput = document.getElementById('roomInput');
+      const mobileInput = document.getElementById('roomInputMobile');
+      return (desktopInput?.value || mobileInput?.value || '').trim();
+    }
+
+    window.onload = () => {
+      const savedName = localStorage.getItem('tuxchat_nickname');
+      if (savedName) {
+        nickname = savedName;
+        document.getElementById('nicknameInput').value = nickname;
+        document.getElementById('splash').classList.add('hide');
+        socket.emit('register', { username: nickname });
+        appendMessage(`Signed in as: ${nickname}`);
+      }
+    };
+
+    function signIn() {
+      nickname = document.getElementById('nicknameInput').value.trim();
+      if (!nickname) return alert('Enter a nickname first!');
+      localStorage.setItem('tuxchat_nickname', nickname);
+      socket.emit('register', { username: nickname });
+      appendMessage(`Signed in as: ${nickname}`);
+    }
+
+    function signInSplash() {
+      const input = document.getElementById('splashNickname');
+      const warning = document.getElementById('nicknameWarning');
+      nickname = input.value.trim();
+      if (!nickname) {
+        warning.classList.remove('hidden');
+        return;
+      }
+      warning.classList.add('hidden');
+      document.getElementById('nicknameInput').value = nickname;
+      document.getElementById('splash').classList.add('hide');
+      localStorage.setItem('tuxchat_nickname', nickname);
+      socket.emit('register', { username: nickname });
+      appendMessage(`Signed in as: ${nickname}`);
+    }
+
+    function joinRoom() {
+      room = getRoomName();
+      if (!room || !nickname) return;
+      socket.emit('join', { room, username: nickname });
+    }
+
+    function hostRoom() {
+      room = getRoomName();
+      if (!room || !nickname) return;
+      socket.emit('host_room', { room, username: nickname });
+      appendMessage(`Hosting room: ${room}`);
+    }
+
+    function leaveRoom() {
+      if (!room) return;
+      socket.emit('leave_room', { room, username: nickname });
+      appendMessage(`Left room: ${room}`);
+      room = '';
+    }
+
+    function sendMessage() {
+      const msg = document.getElementById('messageInput').value.trim();
+      if (!msg || !room || !nickname) return;
+      socket.emit('send_message', { room, message: msg, sender: nickname });
+      appendMessage(`You: ${msg}`);
+      document.getElementById('messageInput').value = '';
+    }
+
+    socket.on('receive_message', data => {
+      if (data.sender === nickname) return;
+      appendMessage(`${data.sender}: ${data.message}`);
+    });
+
+    socket.on('system_message', data => {
+      appendMessage(`* ${data.message}`);
+    });
+
+    function appendMessage(msg) {
+      const box = document.getElementById('chatBox');
+      const div = document.createElement('div');
+      div.textContent = msg;
+      div.className = 'bg-blue-100 text-sm p-2 rounded shadow';
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+  </script>
+</body>
+</html>
